@@ -1,0 +1,10 @@
+*Heading
+** Job name: Job-B
+*Preprint, echo=NO, model=NO, history=NO, contact=NO
+**
+** STEP: Step-1
+**
+*Step, name=Step-1, nlgeom=NO
+*Dynamic, Explicit
+, 1.0
+*End Step

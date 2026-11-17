@@ -1,0 +1,24 @@
+*Heading
+** Job name: Job-A  Model name: Model-1
+*Preprint, echo=NO, model=NO, history=NO, contact=NO
+**
+** PARTS
+**
+*Part, name=Part-1
+*End Part
+**
+** STEP: Step-1
+**
+*Step, name=Step-1, nlgeom=NO
+*Dynamic, Explicit
+, 0.5
+*Bulk Viscosity
+0.06, 1.2
+*End Step
+**
+** STEP: Step-2
+**
+*Step, name=Step-2, nlgeom=NO
+*Dynamic, Explicit
+, 0.5
+*End Step

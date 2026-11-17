@@ -1,0 +1,11 @@
+python312.zip
+.
+..
+# ABQ-Run 专用运行时（官方 embeddable 包，绿色免安装）
+# 1) 本文件存在 = 隔离模式：不读注册表、不读 PYTHONPATH、不加载 site-packages，
+#    因此不会和系统 Python 或 Abaqus 自带的 Python 互相干扰。
+# 2) 这里的路径都相对本文件所在目录(runtime\)：
+#    "."  = runtime 自身（必须保留，C 扩展 .pyd 都在这里）
+#    ".." = 项目根（启动时与当前目录无关）
+# 3) ABQ-Run 只用标准库，不需要 pip、不需要联网。
+#import site

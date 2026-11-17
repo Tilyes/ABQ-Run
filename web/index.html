@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ABQ-Run · Abaqus 作业排队</title>
+<link rel="stylesheet" href="style.css">
+<script>
+/* 主题要在首屏之前套上，否则会闪一下默认配色 */
+try {
+  var t = localStorage.getItem('abqrun.theme');
+  if (t && t !== 'engine') document.documentElement.setAttribute('data-theme', t);
+} catch (e) {}
+</script>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>ABQ<span>·</span>RUN</b><i>Abaqus 作业队列</i></div>
+  <div class="chips">
+    <div class="chip run"><span class="dot"></span>运行 <b id="stRun">0</b></div>
+    <div class="chip queued"><span class="dot"></span>排队 <b id="stQue">0</b></div>
+    <div class="chip">占用核 <b id="stCpu">0</b></div>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn primary" id="btnAdd">＋ 添加作业</button>
+  <button class="btn ghost" id="btnOdb" title="用 CAE 打开任意 .odb">打开 ODB</button>
+  <button class="btn" id="btnPause">暂停队列</button>
+  <button class="btn ghost" id="btnClear">清空已结束</button>
+  <select id="themeSel" class="themesel" title="界面主题">
+    <option value="engine">工程深色</option>
+    <option value="darkplus">Dark+ (VS Code)</option>
+    <option value="darkmodern">Dark Modern</option>
+    <option value="light">Light+ (VS Code)</option>
+    <option value="hc">高对比度</option>
+  </select>
+  <button class="btn" id="btnSet" title="设置">设置</button>
+</div>
+
+<div class="toolbar">
+  <div class="grp">
+    <span>并发作业</span>
+    <div class="stepper">
+      <button data-step="max_jobs:-1">−</button><span id="vMaxJobs">1</span><button data-step="max_jobs:1">+</button>
+    </div>
+  </div>
+  <div class="grp">
+    <span>核数上限</span>
+    <div class="stepper">
+      <button data-step="max_cpus:-4">−</button><span id="vMaxCpus">不限</span><button data-step="max_cpus:4">+</button>
+    </div>
+  </div>
+  <div class="grp">
+    <span>命令</span>
+    <div class="cmdline" id="cmdline" title=""></div>
+  </div>
+  <div class="spacer"></div>
+  <div id="pauseFlag" class="pause-flag" style="display:none">队列已暂停</div>
+</div>
+
+<div class="tablewrap">
+  <table>
+    <thead>
+      <tr>
+        <th class="c-seq">#</th>
+        <th class="c-name">作业 / 目录</th>
+        <th class="c-status">状态</th>
+        <th class="c-type">类型</th>
+        <th class="c-prog">进度</th>
+        <th class="c-step">步 / 增量</th>
+        <th class="c-cpu">CPU</th>
+        <th class="c-mem">内存</th>
+        <th class="c-time">用时</th>
+        <th class="c-eta">剩余</th>
+        <th class="c-act"></th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div class="empty" id="empty">
+    队列是空的。<br>
+    点右上角 <kbd>＋ 添加作业</kbd> 选几个 .inp，它们会按顺序排队提交。<br>
+    <span style="opacity:.65">双击一行可改核数 / 内存；单击查看实时日志。</span>
+  </div>
+</div>
+
+<div class="logbox">
+  <div class="loghead">
+    <div class="tabs">
+      <button class="tab on" data-kind="out">输出</button>
+      <button class="tab" data-kind="problems">问题 <b class="tabnum" id="probBadge"></b></button>
+      <button class="tab" data-kind="sta">进度 (.sta)</button>
+      <button class="tab" data-kind="msg">消息 (.msg)</button>
+      <button class="tab" data-kind="log">日志 (.log)</button>
+      <button class="tab" data-kind="dat">数据 (.dat)</button>
+    </div>
+    <span class="title" id="logTitle">未选择作业</span>
+    <div class="spacer"></div>
+    <label class="autoscroll" id="lblAuto"><input type="checkbox" id="autoScroll" checked>跟随最新</label>
+    <button class="btn sm" id="btnRefreshLog">刷新</button>
+  </div>
+  <pre class="logpre" id="logpre">选择一行作业查看日志…</pre>
+  <div class="probwrap" id="probwrap">
+    <div class="probbar">
+      <button class="fchip on" data-f="all">全部 <b id="pcAll">0</b></button>
+      <button class="fchip err" data-f="error">错误 <b id="pcErr">0</b></button>
+      <button class="fchip warn" data-f="warning">警告 <b id="pcWarn">0</b></button>
+      <div class="spacer"></div>
+      <span class="probtip" id="probtip">扫描 .dat / .msg / .sta / .log / 输出</span>
+    </div>
+    <div class="problist" id="problist"></div>
+  </div>
+</div>
+
+<!-- 添加作业 -->
+<div class="mask" id="maskAdd">
+  <div class="dlg">
+    <header>添加作业<span class="spacer"></span><button class="btn icon ghost" data-close>✕</button></header>
+    <div class="body">
+      <div class="crumbs">
+        <button class="btn sm" id="btnUp">↑ 上级</button>
+        <input type="text" id="fsPath" spellcheck="false">
+        <button class="btn sm" id="btnGo">转到</button>
+      </div>
+      <div class="roots" id="roots"></div>
+      <div class="fslist" id="fslist"></div>
+      <div class="pickedbar" id="picked"></div>
+      <div class="field" style="margin-top:12px">
+        <label>或直接粘贴 .inp 路径（每行一个）</label>
+        <textarea id="pastePaths" placeholder="D:\work\Job-1.inp&#10;D:\work\Job-2.inp"></textarea>
+      </div>
+      <div class="row2">
+        <div class="field"><label>CPU 核数</label><input type="number" id="addCpus" min="1" value="4"></div>
+        <div class="field"><label>内存</label><input type="text" id="addMem" value="8 gb"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>精度</label>
+          <select id="addPrec">
+            <option value="">单精度（默认）</option>
+            <option value="double=explicit">双精度 · Explicit</option>
+            <option value="double=constraint">双精度 · 约束</option>
+            <option value="double=both">双精度 · 全部</option>
+          </select>
+        </div>
+        <div class="field"><label>GPU 数量（0=不用）</label><input type="number" id="addGpu" min="0" value="0"></div>
+      </div>
+      <div class="field"><label>附加参数（可空）</label><input type="text" id="addExtra" placeholder="例如 double=both"></div>
+    </div>
+    <footer>
+      <div class="left" id="addHint">未选择文件</div>
+      <button class="btn" data-close>取消</button>
+      <button class="btn primary" id="btnDoAdd">加入队列</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 编辑作业 -->
+<div class="mask" id="maskEdit">
+  <div class="dlg narrow">
+    <header>编辑作业<span class="spacer"></span><button class="btn icon ghost" data-close>✕</button></header>
+    <div class="body">
+      <div class="field"><label>作业</label><div id="editName" style="font-family:var(--mono);font-size:12px"></div></div>
+      <div class="row2">
+        <div class="field"><label>CPU 核数</label><input type="number" id="editCpus" min="1"></div>
+        <div class="field"><label>内存</label><input type="text" id="editMem"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>精度</label>
+          <select id="editPrec">
+            <option value="">单精度（默认）</option>
+            <option value="double=explicit">双精度 · Explicit</option>
+            <option value="double=constraint">双精度 · 约束</option>
+            <option value="double=both">双精度 · 全部</option>
+          </select>
+        </div>
+        <div class="field"><label>GPU 数量（0=不用）</label><input type="number" id="editGpu" min="0"></div>
+      </div>
+      <div class="field"><label>附加参数</label><input type="text" id="editExtra" placeholder="例如 double=both"></div>
+    </div>
+    <footer>
+      <button class="btn" data-close>取消</button>
+      <button class="btn primary" id="btnSaveEdit">保存</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 设置 -->
+<div class="mask" id="maskSet">
+  <div class="dlg narrow">
+    <header>设置<span class="spacer"></span><button class="btn icon ghost" data-close>✕</button></header>
+    <div class="body">
+      <div class="sect">求解器</div>
+      <div class="field">
+        <label>abaqus 启动命令</label>
+        <div class="inputrow">
+          <input type="text" id="setCmd" spellcheck="false">
+          <button class="btn" data-pick=".bat,.exe,.cmd" data-target="#setCmd">浏览…</button>
+        </div>
+        <div class="hint">Abaqus 自带的启动器，通常在 <code>…\SIMULIA\Commands\abaqus.bat</code></div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label>默认精度</label>
+          <select id="setPrec">
+            <option value="">单精度（Abaqus 默认）</option>
+            <option value="double=explicit">双精度 · Explicit</option>
+            <option value="double=constraint">双精度 · 约束</option>
+            <option value="double=both">双精度 · 全部</option>
+          </select>
+        </div>
+        <div class="field"><label>默认内存</label><input type="text" id="setMem"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>默认 CPU 核数</label><input type="number" id="setCpus" min="1"></div>
+        <div class="field"><label>同时运行作业数</label><input type="number" id="setMaxJobs" min="1"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>核数上限（0=不限）</label><input type="number" id="setMaxCpus" min="0"></div>
+        <div class="field"><label>附加参数</label><input type="text" id="setExtra" placeholder="可空"></div>
+      </div>
+
+      <div class="sect">GPU 加速</div>
+      <div class="gpupanel">
+        <label class="check"><input type="checkbox" id="setGpu" disabled> 默认启用（<b id="gpuN">1</b> 块）</label>
+        <div class="spacer"></div>
+        <button class="btn sm" id="btnReGpu">重新检测</button>
+      </div>
+      <div class="hint" id="gpuMsg">检测中…</div>
+
+      <div class="sect">其他</div>
+      <div class="field">
+        <label>打开 ODB 的方式</label>
+        <select id="setOdbMode">
+          <option value="cae">Abaqus/CAE（完整界面）</option>
+          <option value="viewer">Abaqus Viewer（只看结果）</option>
+        </select>
+      </div>
+      <label class="check" style="margin:10px 0"><input type="checkbox" id="setClearLck"> 启动前自动删除残留的 .lck 锁文件</label>
+      <label class="check" style="margin:10px 0"><input type="checkbox" id="setBeep"> 队列全部跑完时响一声</label>
+    </div>
+    <footer>
+      <div class="left">v1.0 · 关闭黑窗口即停止服务</div>
+      <button class="btn" data-close>取消</button>
+      <button class="btn primary" id="btnSaveSet">保存</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 文件选择器（求解器路径 / odb） -->
+<div class="mask" id="maskPick">
+  <div class="dlg">
+    <header><span id="pkTitle">选择文件</span><span class="spacer"></span><button class="btn icon ghost" data-close>✕</button></header>
+    <div class="body">
+      <div class="crumbs">
+        <button class="btn sm" id="pkUp">↑ 上级</button>
+        <input type="text" id="pkPath" spellcheck="false">
+        <button class="btn sm" id="pkGo">转到</button>
+      </div>
+      <div class="roots" id="pkRoots"></div>
+      <div class="fslist" id="pkList"></div>
+    </div>
+    <footer>
+      <div class="left" id="pkHint"></div>
+      <button class="btn" data-close>取消</button>
+      <button class="btn primary" id="pkOk">用这个文件</button>
+    </footer>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
